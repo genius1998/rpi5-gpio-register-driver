@@ -2,6 +2,12 @@
 
 Raspberry Pi 5의 GPIO 컨트롤러(RP1) 레지스터를 공식 GPIO 드라이버 없이 `ioremap`으로 직접 다루는 리눅스 커널 드라이버를 만들고, 그 위에 미들웨어 API와 "버튼 LED 밝기 스위치 모듈" 앱을 올린 실습이다.
 
+<p align="center">
+  <img src="docs/images/demo.webp" alt="브레드보드의 버튼을 누르자 LED가 켜지고 꺼지며, 길게 누르는 동안 밝기가 단계별로 바뀌는 장면" width="560">
+</p>
+
+<p align="center"><em>짧게 누르면 ON/OFF, 길게 누르면 밝기가 20 → 100 % 단계로 바뀐다 (Raspberry Pi 5 실기)</em></p>
+
 - 드라이버: `/dev/ssafy_gpio` 캐릭터 디바이스. ioctl로 핀 모드, 출력, 입력, PWM, 진단을 제공하고 핀 번호와 모드를 검증한다.
 - 미들웨어: `ssafy_gpio_pinMode()`, `ssafy_gpio_output()`, `ssafy_gpio_pwm()`처럼 비트 연산 없이 쓰는 API와 에러 코드, 버튼 디바운스.
 - 앱: 짧게 누르면 ON/OFF, 길게 누르면 밝기 단계 변경, 5초 넘게 누르면 버튼 고착(`BUTTON_STUCK`) 보고.
@@ -23,25 +29,14 @@ Raspberry Pi 5의 GPIO 컨트롤러(RP1) 레지스터를 공식 GPIO 드라이�
 ### 왜 공식 드라이버를 쓰지 않았나
 리눅스에서 Raspberry Pi 5의 GPIO는 원래 커널의 `pinctrl-rp1` 드라이버가 관리하고, 앱은 libgpiod나 gpiozero로 쓰면 된다. 디바운스와 PWM도 이미 그 안에 있다.
 
-이 실습은 그 계층을 일부러 건너뛰었다. MCU 펌웨어처럼 데이터시트의 레지스터 주소와 비트 필드를 보고 핀을 직접 설정하는 연습을 리눅스 커널 안에서 해 보는 것이 목적이다. 실제 제품이라면 device tree와 `gpiod`, `gpio-keys`, `gpio-leds`, PWM 서브시스템을 써야 한다. 이 점은 [한계](#7-한계)에 정리했다.
+이 실습은 그 계층을 일부러 건너뛰었다. MCU 펌웨어처럼 데이터시트의 레지스터 주소와 비트 필드를 보고 핀을 직접 설정하는 연습을 리눅스 커널 안에서 해 보는 것이 목적이다. 실제 제품이라면 device tree와 `gpiod`, `gpio-keys`, `gpio-leds`, PWM 서브시스템을 써야 한다. 이 점은 [한계](#6-한계)에 정리했다.
 
 ### 차량 스위치 모듈처럼
 과정 실습은 LED 켜기, 버튼 값 읽기, 타이머 점멸처럼 기능별로 따로 끝난다. 이것들을 하나로 묶어 차량 실내 스위치처럼 동작하게 만들었다. 짧게/길게 누름을 구분하고, 버튼이 눌린 채로 고착되거나 출력이 명령과 다르게 나오면 고장으로 보고하고 안전한 상태(LED OFF)로 간다.
 
 ---
 
-## 1. 내가 한 일
-
-1. 과정의 LED 회로(GPIO20)와 버튼 회로(GPIO2, 10kΩ 풀업)를 그대로 쓰고, RP1 레지스터 주소와 비트 필드를 정리했다.
-2. 핀 번호만 바꾸면 어느 핀이든 설정할 수 있도록 레지스터 주소를 계산식으로 일반화한 커널 드라이버를 작성했다.
-3. hrtimer로 100Hz 소프트웨어 PWM을 만들고, PWM 중에도 매 edge마다 출력 readback을 검사하도록 했다.
-4. 드라이버 위에 미들웨어 API(에러 코드 7종, 버튼 디바운스, `help` 출력)를 만들었다.
-5. API만 써서 스위치 앱(짧게/길게 누름, 버튼 고착 감지, 고장 복구)을 작성했다.
-6. 잘못된 입력, readback, PWM, 고장 주입을 자동으로 확인하는 `api_test`를 만들어 Raspberry Pi 5에서 23/23 PASS를 확인했다.
-
----
-
-## 2. 전체 구조
+## 1. 전체 구조
 
 ```
 switch_app.c        짧게/길게/고착 판단, 상태 로그          ← ssafy_gpio API만 사용
@@ -66,7 +61,7 @@ RP1 io_bank0 (GPIOn_CTRL · GPIOn_STATUS) + pads_bank0
 
 ---
 
-## 3. 회로와 레지스터
+## 2. 회로와 레지스터
 
 | 장치 | 연결 | BCM | 물리 핀 |
 |---|---|---|---|
@@ -88,7 +83,7 @@ RP1 io_bank0 (GPIOn_CTRL · GPIOn_STATUS) + pads_bank0
 
 ---
 
-## 4. 동작
+## 3. 동작
 
 | 입력 / 상황 | 결과 |
 |---|---|
@@ -113,7 +108,7 @@ RP1 io_bank0 (GPIOn_CTRL · GPIOn_STATUS) + pads_bank0
 
 ---
 
-## 5. 검증 결과 (Raspberry Pi 5 실기)
+## 4. 검증 결과 (Raspberry Pi 5 실기)
 
 ### API 자동 점검 `sudo ./api_test`
 
@@ -141,6 +136,14 @@ result: 23 passed, 0 failed
 
 ### 스위치 앱 `./switch_app`
 
+<p align="center">
+  <img src="docs/images/result-terminal.webp" alt="MobaXterm에서 switch_app을 실행하고 버튼을 누를 때마다 LED 상태 로그가 찍히는 화면" width="720">
+</p>
+
+<p align="center"><em>버튼 조작에 따라 MobaXterm에 찍히는 switch_app 로그</em></p>
+
+전체 영상: [브레드보드 동작](results/hw_screen.mp4) · [터미널 로그](results/mobaxterm_screen.mp4)
+
 ```
 [   0.000s] [SYS]  switch module start (short: toggle / long: brightness / Ctrl+C: exit)
 [   0.000s] [LED]  LED OFF       (init)
@@ -164,7 +167,7 @@ result: 23 passed, 0 failed
 
 ---
 
-## 6. 빌드와 실행
+## 5. 빌드와 실행
 
 ```bash
 # 커널 헤더 확인 (없으면 sudo apt install linux-headers-rpi-2712)
@@ -205,7 +208,7 @@ GPIO20, GPIO2를 쓰는 다른 모듈이 올라가 있으면 먼저 내려야 �
 
 ---
 
-## 7. 한계
+## 6. 한계
 
 - **공식 드라이버 우회**: `pinctrl-rp1`이 관리하는 레지스터를 직접 쓰므로 같은 핀을 다른 드라이버가 쓰면 충돌한다. 레지스터 제어를 익히기 위한 선택이고, 제품이라면 device tree와 `gpiod` / `gpio-keys` / `gpio-leds` / PWM 서브시스템을 쓴다.
 - **readback으로 못 잡는 고장**: STATUS 23번 비트는 핀(pad) 레벨이라 단락은 잡지만, LED 선이 빠진 단선(open load)은 핀 레벨이 그대로라 잡지 못한다. 단선은 전류 센싱이 있어야 한다. 그래서 고장 시험은 `inject_fault`로 단락을 흉내 냈다.
@@ -214,7 +217,7 @@ GPIO20, GPIO2를 쓰는 다른 모듈이 올라가 있으면 먼저 내려야 �
 
 ---
 
-## 8. 배운 점
+## 7. 배운 점
 
 1. 레지스터 주소를 계산식으로: 과정 실습에서는 GPIO20, GPIO2의 오프셋을 하나씩 찾아 썼다. 표를 다시 보니 STATUS는 `n*8`, CTRL은 `n*8+4`, PAD는 `0x04+n*4`로 규칙이 있어서, 핀 번호만 받으면 어떤 핀이든 설정하는 함수로 일반화할 수 있었다.
 2. 출력도 다시 읽을 수 있다: 출력 핀이라도 PAD의 입력 허용(IE)을 켜면 실제 핀 레벨을 읽을 수 있다. "명령한 값"과 "실제로 나온 값"을 비교하는 것이 진단의 출발점이라는 것을 직접 구현하며 알게 되었다.
